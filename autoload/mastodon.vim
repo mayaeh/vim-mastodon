@@ -130,7 +130,7 @@ function! mastodon#complete(alead, cline, cpos)
   if len(split(a:cline, '\s')) > 2
     return []
   endif
-  return filter(['toot', 'toot-buffer', 'timeline', 'stream'], 'stridx(v:val, a:alead)>=0')
+  return filter(['toot', 'toot-buffer', 'timeline', 'ltl',  'stream'], 'stridx(v:val, a:alead)>=0')
 endfunction
 
 function! mastodon#call(...)
@@ -139,6 +139,19 @@ function! mastodon#call(...)
   if method == 'timeline'
     let res = webapi#http#get(printf('https://%s/api/v1/timelines/home', s:host),
 	\{
+	\},
+	\{
+    \ 'Authorization': 'Bearer ' . s:access_token,
+    \})
+    if res.status != 200
+      return res.message
+    endif
+    let items = webapi#json#decode(res.content)
+    call s:show_timeline(items)
+  elseif method == 'ltl'
+    let res = webapi#http#get(printf('https://%s/api/v1/timelines/public', s:host),
+        \{
+        \  'local': 'true',
 	\},
 	\{
     \ 'Authorization': 'Bearer ' . s:access_token,
