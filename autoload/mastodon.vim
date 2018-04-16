@@ -47,6 +47,22 @@ function! s:format(item)
   return a:item.account.acct . ': ' . s:to_text(a:item.content)
 endfunction
 
+function! s:format_notification(item)
+  if !empty(a:item.type)
+    if a:item.type == 'mention'
+      return a:item.account.acct . ' mentioned: ' . s:to_text(a:item.status.content)
+    elseif a:item.type == 'reblog'
+      return a:item.account.acct . ' boosted: ' . s:to_text(a:item.status.content)
+    elseif a:item.type == 'favourite'
+      return a:item.account.acct . ' favourited: ' . s:to_text(a:item.status.content)
+    elseif a:item.type == 'follow'
+      return a:item.account.acct . ' followed you'
+    else
+      return a:item.account.acct
+    endif
+  endif
+endfunction
+
 function! s:append_line(expr, text) abort
   if bufnr(a:expr) == -1
     return
@@ -126,16 +142,62 @@ function! s:show_timeline(items)
   highlight default link mastodonBoost Directory
 endfunction
 
+function! s:show_notification(items)
+  let winnum = bufwinnr(bufnr('mastodon://'))
+  if winnum != -1
+    if winnum != bufwinnr('%')
+      exe winnum 'wincmd w'
+    endif
+    setlocal modifiable
+  else
+    silent noautocmd rightbelow new
+    setlocal noswapfile
+    silent exec 'noautocmd file' 'mastodon://'
+  endif
+
+  let old_undolevels = &undolevels
+  set undolevels=-1
+  filetype detect
+  silent %d _
+  call setline(1, map(a:items, 's:format_notification(v:val)'))
+  let &undolevels = old_undolevels
+  setlocal buftype=acwrite bufhidden=hide noswapfile
+  setlocal bufhidden=wipe
+  setlocal nomodified
+  setlocal nomodifiable
+
+  syntax clear
+  syntax match mastodonUser /^.\{-1,}:/
+  syntax match mastodonTime /|[^|]\+|$/ contains=mastodonTimeBar
+  syntax match mastodonTimeBar /|/ contained
+  execute 'syntax match mastodonLink "\<'.s:URLMATCH.'"'
+  syntax match mastodonReply "\w\@<!@\w\+"
+  syntax match mastodonLink "\w\@<!#[^[:blank:][:punct:]\u3000\u3001]\+"
+  syntax match mastodonLink "\w\@<!$\a\+"
+  syntax match mastodonTitleStar /\*$/ contained
+  syntax match mastodonReply "\w\@<!@\w\+"
+  syntax match mastodonBoost "\(^[^:]\+: \)\@<=BOOST:.*"
+  highlight default link mastodonUser Identifier
+  highlight default link mastodonTime String
+  highlight default link mastodonTimeBar Ignore
+  highlight default link mastodonTitle Title
+  highlight default link mastodonTitleStar Ignore
+  highlight default link mastodonLink Underlined
+  highlight default link mastodonReply Label
+  highlight default link mastodonBoost Directory
+endfunction
+
 function! mastodon#complete(alead, cline, cpos)
   if len(split(a:cline, '\s')) > 2
     return []
   endif
-  return filter(['toot', 'toot-buffer', 'timeline', 'ltl',  'stream'], 'stridx(v:val, a:alead)>=0')
+  return filter(['toot', 'toot-buffer', 'timeline', 'ltl', 'notify',  'stream'], 'stridx(v:val, a:alead)>=0')
 endfunction
 
 function! mastodon#call(...)
   let method = get(a:000, 0, '')
   let args = get(a:000, 1, '')
+
   if method == 'timeline'
     let res = webapi#http#get(printf('https://%s/api/v1/timelines/home', s:host),
 	\{
@@ -148,10 +210,11 @@ function! mastodon#call(...)
     endif
     let items = webapi#json#decode(res.content)
     call s:show_timeline(items)
+
   elseif method == 'ltl'
     let res = webapi#http#get(printf('https://%s/api/v1/timelines/public', s:host),
-        \{
-        \  'local': 'true',
+    \{
+    \  'local': 'true',
 	\},
 	\{
     \ 'Authorization': 'Bearer ' . s:access_token,
@@ -161,6 +224,20 @@ function! mastodon#call(...)
     endif
     let items = webapi#json#decode(res.content)
     call s:show_timeline(items)
+
+  elseif method == 'notify'
+    let res = webapi#http#get(printf('https://%s/api/v1/notifications', s:host),
+    \{
+  	\},
+  	\{
+    \ 'Authorization': 'Bearer ' . s:access_token,
+    \})
+    if res.status != 200
+      return res.message
+    endif
+    let items = webapi#json#decode(res.content)
+    call s:show_notification(items)
+
   elseif method == 'toot'
     let text = join(a:000[1:], " ")
     let res = webapi#http#post(printf('https://%s/api/v1/statuses', s:host),
@@ -173,6 +250,7 @@ function! mastodon#call(...)
     if res.status != 200
       return res.message
     endif
+
   elseif method == 'toot-buffer'
     let text = join(a:000[1:], "\n")
     let res = webapi#http#post(printf('https://%s/api/v1/statuses', s:host),
