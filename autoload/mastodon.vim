@@ -42,7 +42,7 @@ endfunction
 
 function! s:format(item)
   if !empty(a:item.reblog)
-    return a:item.account.acct . ': BOOST: ' . s:to_text(a:item.reblog.content)
+    return a:item.account.acct . ': BOOST: (' . a:item.reblog.account.acct . ') ' . s:to_text(a:item.reblog.content)
   endif
   return a:item.account.acct . ': ' . s:to_text(a:item.content)
 endfunction
